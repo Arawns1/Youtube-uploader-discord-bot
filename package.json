@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon src/index.js",
+    "registerCommands": "node src/register-commands.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
