@@ -2,7 +2,9 @@ import { ActionRowBuilder, Client, GatewayIntentBits, ModalBuilder, TextInputBui
 import * as fs from "fs"
 import * as path from "path"
 import { Readable } from "stream"
-import { CANAL_CLIPES_ID, TOKEN } from "./constantes.js"
+import { CANAL_CLIPES_ID, REQUEST_QUEUE_NAME, REPLY_QUEUE_NAME, TOKEN } from "./constantes.js"
+import { createClipsChannel } from './clipsChannel.js'
+import { randomUUID } from 'node:crypto';
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent],
@@ -12,13 +14,15 @@ client.on("ready", () => {
     console.log(`✅ Logged in as ${client.user.tag}!`)
 })
 
+const clipsChannel = await createClipsChannel()
+
 client.on("interactionCreate", async interaction => {
     if (!interaction.isChatInputCommand()) return
 
     const { commandName, user, channel } = interaction
 
     if (commandName === "yt") {
-        if (interaction.channelId !== CANAL_CLIPES_ID) return
+        // if (interaction.channelId !== CANAL_CLIPES_ID) return
         const modal = youtubeUploaderModal(user)
         await interaction.showModal(modal)
         const filter = interaction => interaction.customId === modal.data.custom_id
@@ -40,11 +44,38 @@ client.on("interactionCreate", async interaction => {
                         ephemeral: true
                     })
                 }
+
                 ultimaMensagem.attachments.forEach(async anexo => {
                     if (isAnexoUmVideo(anexo.contentType)) {
                         const video = new Video(anexo.id, tituloValue, descricaoValue, anexo.contentType, anexo.size, anexo.url, ultimaMensagem.author.username)
-                        await salvarVideo(video.link, video.titulo, video.getExtensao())
-                        modalInteraction.reply(`Clipe: '${tituloValue}' adicionado a fila com sucesso!`)
+
+                        if (clipsChannel) {
+                            const messageJSON = JSON.stringify(video)
+                            var correlationId = randomUUID();
+
+                            await clipsChannel.assertQueue(REPLY_QUEUE_NAME, { durable: false })
+                            clipsChannel.consume(REPLY_QUEUE_NAME, (msg) => {
+                                if (msg.properties.correlationId == correlationId) {
+                                    return modalInteraction.reply('Link do clipe: ', msg.content.toString())
+                                }
+                            }, {
+                                noAck: true
+                            });
+
+                            clipsChannel.sendToQueue(
+                                REQUEST_QUEUE_NAME,
+                                Buffer.from(messageJSON),
+                                {
+                                    persistent: true,
+                                    replyTo: REPLY_QUEUE_NAME,
+                                    correlationId
+                                })
+                            modalInteraction.reply(`Clipe: '${tituloValue}' adicionado a fila com sucesso!`)
+                        }
+                        else {
+                            modalInteraction.reply("Não foi possível enviar o clipe para a fila, tente novamente mais tarde.")
+                        }
+
                     }
                 })
             })
@@ -105,33 +136,4 @@ class Video {
     getExtensao() {
         return this.formato.split("/")[1]
     }
-}
-
-async function salvarVideo(videoURL, titulo, extensao) {
-    console.log(`> Baixando video: ${videoURL}`);
-    const response = await fetch(videoURL);
-
-    if (!response.ok) {
-        throw new Error(`Erro ao baixar o vídeo: ${response.statusText}`);
-    }
-    const __dirname = path.resolve();
-
-    const filePath = path.join(__dirname, 'temp', `${titulo}.${extensao}`);
-
-    const fileStream = fs.createWriteStream(filePath);
-
-    return new Promise((resolve, reject) => {
-
-        Readable.fromWeb(response.body).pipe(fileStream);
-
-        fileStream.on('finish', () => {
-            console.log('> Download concluído');
-            resolve(filePath);
-        });
-
-        fileStream.on('error', (err) => {
-            console.error('> Erro ao salvar o arquivo', err);
-            reject(err);
-        });
-    });
 }
