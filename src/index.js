@@ -1,7 +1,4 @@
 import { ActionRowBuilder, Client, GatewayIntentBits, ModalBuilder, TextInputBuilder, TextInputStyle } from "discord.js"
-import * as fs from "fs"
-import * as path from "path"
-import { Readable } from "stream"
 import { CANAL_CLIPES_ID, REQUEST_QUEUE_NAME, REPLY_QUEUE_NAME, TOKEN } from "./constantes.js"
 import { createClipsChannel } from './clipsChannel.js'
 import { randomUUID } from 'node:crypto';
@@ -22,12 +19,12 @@ client.on("interactionCreate", async interaction => {
     const { commandName, user, channel } = interaction
 
     if (commandName === "yt") {
-        // if (interaction.channelId !== CANAL_CLIPES_ID) return
+        if (interaction.channelId !== CANAL_CLIPES_ID) return
         const modal = youtubeUploaderModal(user)
         await interaction.showModal(modal)
         const filter = interaction => interaction.customId === modal.data.custom_id
 
-        await interaction.awaitModalSubmit({ filter, time: 30_000 })
+        await interaction.awaitModalSubmit({ filter, time: 120_000 })
             .then(async modalInteraction => {
                 const tituloValue = modalInteraction.fields.getTextInputValue("tituloInput")
                 const descricaoValue = modalInteraction.fields.getTextInputValue("descricaoInput")
@@ -56,7 +53,9 @@ client.on("interactionCreate", async interaction => {
                             await clipsChannel.assertQueue(REPLY_QUEUE_NAME, { durable: false })
                             clipsChannel.consume(REPLY_QUEUE_NAME, (msg) => {
                                 if (msg.properties.correlationId == correlationId) {
-                                    return modalInteraction.reply('Link do clipe: ', msg.content.toString())
+                                    const receivedMessage = msg.content.toString()
+                                    console.log(receivedMessage)
+                                    return modalInteraction.followUp(receivedMessage)
                                 }
                             }, {
                                 noAck: true
